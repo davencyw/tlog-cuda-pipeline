@@ -1,0 +1,35 @@
+# Build output
+build/
+
+# Compiled binaries / objects
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+*.out
+
+# CUDA artifacts
+*.ptx
+*.cubin
+*.fatbin
+*.i
+*.ii
+*.gpu
+*.cudafe1.*
+*.module_id
+
+# Nsight / profiler reports
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+*.qdstrm
+*.sqlite
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
