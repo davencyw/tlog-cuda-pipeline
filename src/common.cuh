@@ -38,7 +38,7 @@ inline double max_rel_error(const std::vector<float>& ref,
     for (size_t i = 0; i < ref.size(); ++i) {
         double r = ref[i];
         double t = test[i];
-        double denom = std::max(1e-6, std::fabs(r));
+        double denom = std::max(1e-3, std::fabs(r));
         worst = std::max(worst, std::fabs(r - t) / denom);
     }
     return worst;

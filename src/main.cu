@@ -5,11 +5,16 @@
 //   (A) sync           - synchronous shared-memory staging
 //   (B) cp.async       - raw asynchronous copy intrinsics, multi-stage
 //   (C) cuda::pipeline - multi-stage software pipeline abstraction
+//   (D) TMA            - Hopper bulk tensor copies + mbarrier (sm_90+)
+//   (E) TMA+WGMMA      - 128B-swizzled TMA + warpgroup MMA, pipelined (sm_90+)
+//   (F) WGMMA no pipe  - same tiled WGMMA, single-stage (load then compute)
 //
 // All kernels are verified against a CPU reference (small N) and the baseline.
 
 #include "common.cuh"
 #include "kernels.cuh"
+#include "tma.cuh"
+#include "wgmma.cuh"
 
 #include <cstring>
 #include <cuda_fp16.h>
@@ -203,6 +208,48 @@ int main(int argc, char **argv) {
       gemm_pipeline<S.value><<<grid, block>>>(dA, dB, dC, N, N, N);
     });
   }));
+  if (prop.major >= 9) {
+    const CUtensorMap tmap_a = encode_tma_a(dA, N, N);
+    const CUtensorMap tmap_b = encode_tma_b(dB, N, N);
+    results.push_back(bench("TMA", [&] {
+      launch_staged([&](auto S) {
+        gemm_tma<S.value><<<grid, block>>>(tmap_a, tmap_b, dC, N, N, N);
+      });
+    }));
+
+    if (N % WGMMA_BK == 0) {
+      std::vector<half> hB_nk;
+      transpose_b_kn_to_nk(hB, hB_nk, N, N);
+      half *dB_nk = nullptr;
+      CUDA_CHECK(cudaMalloc(&dB_nk, elems * sizeof(half)));
+      CUDA_CHECK(cudaMemcpy(dB_nk, hB_nk.data(), elems * sizeof(half),
+                            cudaMemcpyHostToDevice));
+      const CUtensorMap wg_a = encode_wgmma_tma_a(dA, N, N);
+      const CUtensorMap wg_b = encode_wgmma_tma_b(dB_nk, N, N);
+      const dim3 wg_block(WGMMA_THREADS);
+      wgmma_request_smem<1>(gemm_tma_wgmma<1>);
+      switch (cfg.stages) {
+      case 2:
+        wgmma_request_smem<2>(gemm_tma_wgmma<2>);
+        break;
+      case 3:
+        wgmma_request_smem<3>(gemm_tma_wgmma<3>);
+        break;
+      case 4:
+        wgmma_request_smem<4>(gemm_tma_wgmma<4>);
+        break;
+      }
+      results.push_back(bench("WGMMA no pipe", [&] {
+        gemm_tma_wgmma<1><<<grid, wg_block>>>(wg_a, wg_b, dC, N, N, N);
+      }));
+      results.push_back(bench("TMA+WGMMA", [&] {
+        launch_staged([&](auto S) {
+          gemm_tma_wgmma<S.value><<<grid, wg_block>>>(wg_a, wg_b, dC, N, N, N);
+        });
+      }));
+      CUDA_CHECK(cudaFree(dB_nk));
+    }
+  }
 
   std::printf("%-18s %12s %12s %12s %12s\n", "kernel", "time (ms)", "TFLOP/s",
               "speedup", "max rel err");

@@ -18,12 +18,20 @@ ARCH    := sm_80
 endif
 STD     ?= c++17
 
+# Hopper WGMMA/TMA need compute_90a (plain sm_90 is insufficient).
+ifeq ($(ARCH),sm_90)
+GENCODE := -gencode arch=compute_90a,code=sm_90a
+else
+GENCODE := -gencode arch=compute_$(subst sm_,,$(ARCH)),code=$(ARCH)
+endif
+
 BUILD   := build
 TARGET  := $(BUILD)/gemm_pipeline
 SRC     := src/main.cu
-DEPS    := src/common.cuh src/kernels.cuh
+DEPS    := src/common.cuh src/kernels.cuh src/tma.cuh src/wgmma.cuh
 
-NVCCFLAGS := -O3 -std=$(STD) -arch=$(ARCH) --expt-relaxed-constexpr -lineinfo
+NVCCFLAGS := -O3 -std=$(STD) $(GENCODE) --expt-relaxed-constexpr -lineinfo
+LDFLAGS   := -lcuda
 
 # Default runtime arguments (override on the command line, e.g. `make run N=8192`).
 N      ?= 4096
@@ -42,7 +50,7 @@ NCU_METRICS := \
 all: $(TARGET)
 
 $(TARGET): $(SRC) $(DEPS) | $(BUILD)
-	$(NVCC) $(NVCCFLAGS) $(SRC) -o $@
+	$(NVCC) $(NVCCFLAGS) $(SRC) -o $@ $(LDFLAGS)
 
 $(BUILD):
 	mkdir -p $(BUILD)

@@ -1,13 +1,11 @@
 #pragma once
 
-#include <cooperative_groups.h>
 #include <cuda/pipeline>
 #include <cuda_fp16.h>
 #include <cuda_pipeline.h>
 #include <cuda_runtime.h>
 #include <mma.h>
 
-namespace cg = cooperative_groups;
 using namespace nvcuda;
 
 // ===========================================================================
@@ -208,7 +206,7 @@ __global__ void gemm_cpasync(const half *__restrict__ A,
 }
 
 // ===========================================================================
-// (C) cuda::pipeline: multi-stage abstraction
+// (C) cuda::pipeline: multi-stage abstraction (thread-local pipe -> cp.async)
 // ===========================================================================
 template <int STAGES>
 __global__ void gemm_pipeline(const half *__restrict__ A,
@@ -217,33 +215,15 @@ __global__ void gemm_pipeline(const half *__restrict__ A,
   __shared__ half As[STAGES][A_TILE];
   __shared__ half Bs[STAGES][B_TILE];
 
-  auto block = cg::this_thread_block();
-  __shared__ cuda::pipeline_shared_state<cuda::thread_scope_block, STAGES>
-      shared_state;
-  auto pipe = cuda::make_pipeline(block, &shared_state);
+  auto pipe = cuda::make_pipeline();
 
   const int warp = threadIdx.x / 32;
   const int warpRow = warp / WARP_N, warpCol = warp % WARP_N;
   const int nK = K / BK;
 
   auto fetch = [&](int stage, int kt) {
-    pipe.producer_acquire();
-    half *As_s = As[stage];
-    half *Bs_s = Bs[stage];
-    for (int fi = threadIdx.x; fi < A_F4; fi += THREADS) {
-      const int row = fi / (BK / 8);
-      const int col = (fi % (BK / 8)) * 8;
-      cuda::memcpy_async(&As_s[row * BK + col],
-                         &A[(blockIdx.y * BM + row) * K + kt * BK + col],
-                         cuda::aligned_size_t<16>(sizeof(float4)), pipe);
-    }
-    for (int fi = threadIdx.x; fi < B_F4; fi += THREADS) {
-      const int row = fi / (BN / 8);
-      const int col = (fi % (BN / 8)) * 8;
-      cuda::memcpy_async(&Bs_s[row * BN + col],
-                         &B[(kt * BK + row) * N + blockIdx.x * BN + col],
-                         cuda::aligned_size_t<16>(sizeof(float4)), pipe);
-    }
+    load_A_cpasync(As[stage], A, K, blockIdx.y, kt * BK);
+    load_B_cpasync(Bs[stage], B, N, blockIdx.x, kt * BK);
     pipe.producer_commit();
   };
 
@@ -264,9 +244,7 @@ __global__ void gemm_pipeline(const half *__restrict__ A,
     __syncthreads();
 
     mma_tile(As[kt % STAGES], Bs[kt % STAGES], warpRow, warpCol, acc);
-
     __syncthreads();
-    pipe.consumer_release();
   }
   store_C(C, N, blockIdx.y, blockIdx.x, warpRow, warpCol, acc);
 }
