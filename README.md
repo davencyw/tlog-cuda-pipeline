@@ -41,23 +41,23 @@ Three variants differ **only** in how the next K-tile is staged
 
 ---
 
-## Results (A100)
+## Results (H100)
 
 ```
 N=4096, stages=3
 kernel                time (ms)      TFLOP/s      speedup  max rel err
 ------                ---------      -------      -------  -----------
-sync                      3.241         42.4        1.00x     0.00e+00
-cp.async                  2.653         51.8        1.22x     0.00e+00
-cuda::pipeline            3.014         45.6        1.08x     0.00e+00
+sync                      2.042         67.3        1.00x     0.00e+00
+cp.async                  1.586         86.7        1.29x     0.00e+00
+cuda::pipeline            1.600         85.9        1.28x     0.00e+00
 
 N=8192, stages=3
-sync                     24.869         44.2        1.00x     0.00e+00
-cp.async                 19.950         55.1        1.25x     0.00e+00
-cuda::pipeline           22.631         48.6        1.10x     0.00e+00
+sync                     16.446         66.9        1.00x     0.00e+00
+cp.async                 12.558         87.6        1.31x     0.00e+00
+cuda::pipeline           12.639         87.0        1.30x     0.00e+00
 ```
 
-**`cp.async` prefetching is a clean ~1.22–1.25x over the synchronous baseline**,
+**`cp.async` prefetching is a clean ~1.28–1.31x over the synchronous baseline**,
 in a real GEMM at normal occupancy. That is the headline: *pipelining wins here.*
 
 Correctness: every variant is checked against the synchronous kernel
@@ -66,7 +66,7 @@ small `N`.
 
 ### Caveats
 
-- **Absolute TFLOP/s is below cuBLAS** (~150+ TFLOP/s FP16 on A100). This is a
+- **Absolute TFLOP/s is below cuBLAS** (~300+ TFLOP/s FP16 on H100). This is a
   teaching kernel that isolates *the pipelining effect*. It omits register
   double-buffering, shared-memory swizzling and epilogue tricks a production
   GEMM uses. The **relative** `sync` vs `cp.async` comparison is the point.
@@ -76,11 +76,12 @@ small `N`.
 
 ## Building and Running
 
-Requires a CUDA toolkit (tested with CUDA 13.0) and an sm_80+ GPU (tensor cores
-+ `cp.async`; tested on an A100).
+Requires a CUDA toolkit (tested with CUDA 13.3) and an sm_80+ GPU (tensor cores
++ `cp.async`; tested on an H100). The Makefile auto-detects the target
+architecture from the first visible GPU (`sm_80` for A100, `sm_90` for H100).
 
 ```bash
-make                       # build -> build/gemm_pipeline (ARCH=sm_80 default)
+make                       # build -> build/gemm_pipeline
 make run                   # N=4096, stages=3
 make run N=8192 STAGES=2   # override size / pipeline depth
 

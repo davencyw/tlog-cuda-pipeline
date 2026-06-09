@@ -5,11 +5,17 @@
 #   make profile    build and capture an Nsight Compute report
 #   make clean      remove build artifacts
 #
-# Override the target architecture for non-A100 GPUs, e.g.:
-#   make ARCH=sm_86
+# Override the target architecture if needed, e.g.:
+#   make ARCH=sm_80    # A100
+#   make ARCH=sm_90    # H100
+# When ARCH is unset, the first visible GPU's compute capability is used.
 
 NVCC    ?= nvcc
-ARCH    ?= sm_80
+ARCH    ?= $(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+                   | head -1 | tr -d '.' | sed 's/^/sm_/')
+ifeq ($(ARCH),sm_)
+ARCH    := sm_80
+endif
 STD     ?= c++17
 
 BUILD   := build
